@@ -82,6 +82,46 @@ async fn run_worker(
     }
 }
 
+struct Worker {
+    num_workers: usize,
+    repo: Arc<JobRepo>,
+    handler: Arc<dyn HandlesJob>
+}
+
+impl Worker {
+    async fn new(num_workers: usize, handler: Arc<dyn HandlesJob>) -> anyhow::Result<Self> {
+        let opts = SqliteConnectOptions::from_str("sqlite://local.db?mode=rwc")?
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
+        let repo = Arc::new(JobRepo {
+            pool: SqlitePool::connect_with(opts).await.unwrap(),
+        });
+
+        repo.create_tables().await?;
+
+        Ok(Self {
+            num_workers,
+            repo,
+            handler,
+        })
+    }
+
+    async fn start(&self) -> anyhow::Result<()> {
+        let mut worker_handles = Vec::new();
+        let handler = &self.handler;
+
+        println!("Starting with {} workers.", self.num_workers);
+        for i in 0..self.num_workers {
+            worker_handles.push(tokio::spawn(run_worker(i, self.repo.clone(), handler.clone())));
+        }
+
+        for h in worker_handles {
+            let _ = h.await?;
+        }
+        
+        Ok(())
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut num_workers: usize = DEFAULT_NUM_WORKERS;
@@ -96,25 +136,9 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let opts = SqliteConnectOptions::from_str("sqlite://local.db?mode=rwc")?
-        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
-    let repo = Arc::new(JobRepo {
-        pool: SqlitePool::connect_with(opts).await.unwrap(),
-    });
+    let worker = Worker::new(num_workers, Arc::new(Handler {})).await?;
 
-    repo.create_tables().await?;
-
-    let mut handles = Vec::new();
-    let handler = Arc::new(Handler {});
-
-    println!("Starting with {num_workers} workers.");
-    for i in 0..num_workers {
-        handles.push(tokio::spawn(run_worker(i, repo.clone(), handler.clone())));
-    }
-
-    for h in handles {
-        let _ = h.await?;
-    }
+    worker.start().await?;
 
     Ok(())
 }
