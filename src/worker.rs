@@ -13,12 +13,24 @@ pub enum WorkerStep {
     Failure { job_id: i64, reason: String },
 }
 
-const MAX_JOB_ATTEMPTS: i32 = 3;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkerConfig {
+    pub max_job_attempts: i32,
+}
 
 pub struct Worker<T: Serialize + DeserializeOwned + Send + Sync> {
     pub num_workers: usize,
     pub repo: Arc<JobRepo<T>>,
     handler: Arc<dyn HandlesJob<T>>,
+    pub config: WorkerConfig,
+}
+
+impl Default for WorkerConfig {
+    fn default() -> Self {
+        Self {
+            max_job_attempts: 3,
+        }
+    }
 }
 
 impl<T: Serialize + DeserializeOwned + Send + Sync + 'static> Worker<T> {
@@ -36,6 +48,7 @@ impl<T: Serialize + DeserializeOwned + Send + Sync + 'static> Worker<T> {
             num_workers,
             repo,
             handler,
+            config: Default::default(),
         })
     }
 
@@ -46,8 +59,9 @@ impl<T: Serialize + DeserializeOwned + Send + Sync + 'static> Worker<T> {
         for i in 0..self.num_workers {
             let repo = self.repo.clone();
             let handler = self.handler.clone();
+            let config = self.config.clone();
             worker_handles.push(tokio::spawn(async move {
-                Self::run_worker(i, repo, handler).await
+                Self::run_worker(i, repo, handler, config).await
             }));
         }
 
@@ -62,6 +76,7 @@ impl<T: Serialize + DeserializeOwned + Send + Sync + 'static> Worker<T> {
         worker_id: usize,
         repo: &JobRepo<T>,
         handler: &dyn HandlesJob<T>,
+        config: &WorkerConfig,
     ) -> anyhow::Result<WorkerStep> {
         let maybe_job = repo.claim_next(unix_now(), 10).await?;
 
@@ -80,7 +95,7 @@ impl<T: Serialize + DeserializeOwned + Send + Sync + 'static> Worker<T> {
                 Ok(WorkerStep::Succeeded { job_id })
             }
             Ok(HandleOutcome::Retry { reason }) => {
-                if job.attempts == MAX_JOB_ATTEMPTS {
+                if job.attempts == config.max_job_attempts {
                     println!(
                         "[{worker_id}] Job {job_id} failed 3 times. Reason: {reason}. Marking as failed."
                     );
@@ -107,9 +122,10 @@ impl<T: Serialize + DeserializeOwned + Send + Sync + 'static> Worker<T> {
         worker_id: usize,
         repo: Arc<JobRepo<T>>,
         handler: Arc<dyn HandlesJob<T>>,
+        config: WorkerConfig,
     ) -> anyhow::Result<()> {
         loop {
-            match Self::run_worker_once(worker_id, &repo, &*handler).await {
+            match Self::run_worker_once(worker_id, &repo, &*handler, &config).await {
                 Ok(WorkerStep::Idle) => {
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await
                 }
@@ -146,6 +162,7 @@ mod test {
             num_workers: 1,
             repo: setup().await?,
             handler,
+            config: Default::default(),
         };
         let job_payload = JobPayload::Generate(GeneratePayload {
             id: 1,
@@ -156,8 +173,9 @@ mod test {
 
         let repo = worker.repo.clone();
         let handler = worker.handler.clone();
+        let config = worker.config.clone();
         let t = tokio::spawn(async move {
-            let res = Worker::run_worker_once(0, &repo, &*handler).await;
+            let res = Worker::run_worker_once(0, &repo, &*handler, &config).await;
             assert_eq!(WorkerStep::Succeeded { job_id: 1 }, res.unwrap());
         });
 
@@ -173,6 +191,7 @@ mod test {
             num_workers: 1,
             repo: setup().await?,
             handler,
+            config: Default::default(),
         };
         let job_payload = JobPayload::Generate(GeneratePayload {
             id: 1,
@@ -183,8 +202,9 @@ mod test {
 
         let repo = worker.repo.clone();
         let handler = worker.handler.clone();
+        let config = worker.config.clone();
         let t = tokio::spawn(async move {
-            let res = Worker::run_worker_once(0, &repo, &*handler).await;
+            let res = Worker::run_worker_once(0, &repo, &*handler, &config).await;
             assert_eq!(
                 WorkerStep::Retry {
                     job_id: 1,
@@ -206,6 +226,7 @@ mod test {
             num_workers: 1,
             repo: setup().await?,
             handler: retry_handler,
+            config: Default::default(),
         };
         let success_handler = Arc::new(AlwaysSucceedHandler {});
         let job_payload = JobPayload::Generate(GeneratePayload {
@@ -216,7 +237,8 @@ mod test {
         assert_eq!(worker.repo.enqueue(&job_payload).await.unwrap(), 1);
 
         let t = tokio::spawn(async move {
-            let res = Worker::run_worker_once(0, &worker.repo, &*worker.handler).await;
+            let res =
+                Worker::run_worker_once(0, &worker.repo, &*worker.handler, &worker.config).await;
             assert_eq!(
                 res.unwrap(),
                 WorkerStep::Retry {
@@ -225,7 +247,8 @@ mod test {
                 },
             );
             worker.handler = success_handler.clone();
-            let res = Worker::run_worker_once(0, &worker.repo, &*worker.handler).await;
+            let res =
+                Worker::run_worker_once(0, &worker.repo, &*worker.handler, &worker.config).await;
             assert_eq!(res.unwrap(), WorkerStep::Succeeded { job_id: 1 },);
         });
 
@@ -241,6 +264,7 @@ mod test {
             num_workers: 1,
             repo: setup().await?,
             handler,
+            config: Default::default(),
         };
         let job_payload = JobPayload::Generate(GeneratePayload {
             id: 1,
@@ -251,8 +275,9 @@ mod test {
 
         let repo = worker.repo.clone();
         let handler = worker.handler.clone();
+        let config = worker.config.clone();
         let t = tokio::spawn(async move {
-            let res = Worker::run_worker_once(0, &repo, &*handler).await;
+            let res = Worker::run_worker_once(0, &repo, &*handler, &config).await;
             assert_eq!(
                 res.unwrap(),
                 WorkerStep::Retry {
@@ -260,7 +285,7 @@ mod test {
                     reason: "alwaysretries".to_string()
                 },
             );
-            let res = Worker::run_worker_once(0, &repo, &*handler).await;
+            let res = Worker::run_worker_once(0, &repo, &*handler, &config).await;
             assert_eq!(
                 res.unwrap(),
                 WorkerStep::Retry {
@@ -268,7 +293,7 @@ mod test {
                     reason: "alwaysretries".to_string()
                 },
             );
-            let res = Worker::run_worker_once(0, &repo, &*handler).await;
+            let res = Worker::run_worker_once(0, &repo, &*handler, &config).await;
             assert_eq!(
                 res.unwrap(),
                 WorkerStep::Failure {
@@ -290,6 +315,7 @@ mod test {
             num_workers: 1,
             repo: setup().await?,
             handler,
+            config: Default::default(),
         };
         let job_payload = JobPayload::Generate(GeneratePayload {
             id: 1,
@@ -300,8 +326,9 @@ mod test {
 
         let repo = worker.repo.clone();
         let handler = worker.handler.clone();
+        let config = worker.config.clone();
         let t = tokio::spawn(async move {
-            let res = Worker::run_worker_once(0, &repo, &*handler).await;
+            let res = Worker::run_worker_once(0, &repo, &*handler, &config).await;
             assert_eq!(
                 WorkerStep::Failure {
                     job_id: 1,
@@ -324,11 +351,13 @@ mod test {
             num_workers: 1,
             repo: repo.clone(),
             handler: handler.clone(),
+            config: Default::default(),
         };
         let worker_2 = Worker {
             num_workers: 1,
             repo,
             handler: handler.clone(),
+            config: Default::default(),
         };
         let job_payload = JobPayload::Generate(GeneratePayload {
             id: 1,
@@ -339,13 +368,17 @@ mod test {
 
         let repo_1 = worker_1.repo.clone();
         let handler_1 = worker_1.handler.clone();
+        let config_1 = worker_1.config.clone();
         let repo_2 = worker_2.repo.clone();
         let handler_2 = worker_2.handler.clone();
+        let config_2 = worker_2.config.clone();
 
-        let t1 =
-            tokio::spawn(async move { Worker::run_worker_once(0, &repo_1, &*handler_1).await });
-        let t2 =
-            tokio::spawn(async move { Worker::run_worker_once(0, &repo_2, &*handler_2).await });
+        let t1 = tokio::spawn(async move {
+            Worker::run_worker_once(0, &repo_1, &*handler_1, &config_1).await
+        });
+        let t2 = tokio::spawn(async move {
+            Worker::run_worker_once(0, &repo_2, &*handler_2, &config_2).await
+        });
 
         let res1 = t1.await.unwrap()?;
         let res2 = t2.await.unwrap()?;

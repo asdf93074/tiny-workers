@@ -8,4 +8,4 @@ mod utils;
 pub use handlers::{HandleOutcome, HandlesJob};
 pub use job_repo::JobRepo;
 pub use jobs::{ClaimedJob, JobStatus};
-pub use worker::{Worker, WorkerStep};
+pub use worker::{Worker, WorkerStep, WorkerConfig};
