@@ -7,7 +7,11 @@ pub enum HandleOutcome {
 }
 
 #[async_trait]
-pub trait HandlesJob<T: Serialize + DeserializeOwned>: Send + Sync {
+pub trait HandlesJob<T>
+where
+    Self: Send + Sync,
+    T: Serialize + DeserializeOwned,
+{
     async fn handle_job(&self, job_payload: &T) -> anyhow::Result<HandleOutcome>;
 }
 

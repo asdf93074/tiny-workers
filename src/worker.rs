@@ -18,7 +18,7 @@ pub struct WorkerConfig {
     pub max_job_attempts: i32,
 }
 
-pub struct Worker<T: Serialize + DeserializeOwned + Send + Sync> {
+pub struct Worker<T> {
     pub num_workers: usize,
     pub repo: Arc<JobRepo<T>>,
     handler: Arc<dyn HandlesJob<T>>,
@@ -33,7 +33,10 @@ impl Default for WorkerConfig {
     }
 }
 
-impl<T: Serialize + DeserializeOwned + Send + Sync + 'static> Worker<T> {
+impl<T> Worker<T>
+where
+    T: Serialize + DeserializeOwned + Send + Sync + 'static,
+{
     pub async fn new(num_workers: usize, handler: Arc<dyn HandlesJob<T>>) -> anyhow::Result<Self> {
         let opts = SqliteConnectOptions::from_str("sqlite://local.db?mode=rwc")?
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
