@@ -1,12 +1,14 @@
+use serde::{Serialize, de::DeserializeOwned};
 use sqlx::SqlitePool;
 
-use crate::{ClaimedJob, JobPayload, JobStatus};
+use crate::{ClaimedJob, JobStatus};
 
-pub struct JobRepo {
+pub struct JobRepo<T> {
     pub pool: SqlitePool,
+    pub _marker: std::marker::PhantomData<T>,
 }
 
-impl JobRepo {
+impl<T: Serialize + DeserializeOwned> JobRepo<T> {
     pub async fn create_tables(&self) -> anyhow::Result<()> {
         const JOBS_SCHEMA: &str = "
             CREATE TABLE IF NOT EXISTS jobs (
@@ -27,7 +29,7 @@ impl JobRepo {
     }
 
     #[allow(dead_code)]
-    pub async fn enqueue(&self, payload: &JobPayload) -> anyhow::Result<u64> {
+    pub async fn enqueue(&self, payload: &T) -> anyhow::Result<u64> {
         let payload_json = serde_json::to_value(&payload).unwrap();
         let inserted = sqlx::query(
             "
@@ -49,7 +51,7 @@ impl JobRepo {
         &self,
         now: i64,
         lease_for_secs: i64,
-    ) -> anyhow::Result<Option<ClaimedJob>> {
+    ) -> anyhow::Result<Option<ClaimedJob<T>>> {
         let claimed_job: Option<(i64, i32, String)> = sqlx::query_as(
             "
             UPDATE jobs
@@ -160,18 +162,20 @@ impl JobRepo {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
+    use std::{marker::PhantomData, str::FromStr};
 
     use sqlx::sqlite::SqliteConnectOptions;
 
+    use crate::jobs::test::{GeneratePayload, JobPayload};
     use crate::utils::unix_now;
 
     use super::*;
 
-    async fn setup() -> anyhow::Result<JobRepo> {
+    async fn setup() -> anyhow::Result<JobRepo<JobPayload>> {
         let opts = SqliteConnectOptions::from_str("sqlite::memory:").unwrap();
-        let repo = JobRepo {
+        let repo = JobRepo::<JobPayload> {
             pool: SqlitePool::connect_with(opts).await.unwrap(),
+            _marker: PhantomData,
         };
 
         repo.create_tables().await?;
@@ -182,7 +186,7 @@ mod test {
     #[tokio::test]
     async fn enqueue_round_trip() {
         let repo = setup().await.unwrap();
-        let job_payload = JobPayload::Generate(crate::GeneratePayload {
+        let job_payload = JobPayload::Generate(GeneratePayload {
             id: 1,
             min: 10,
             max: 20,
@@ -211,7 +215,7 @@ mod test {
     #[tokio::test]
     async fn claim_job_works() {
         let repo = setup().await.unwrap();
-        let job_payload = JobPayload::Generate(crate::GeneratePayload {
+        let job_payload = JobPayload::Generate(GeneratePayload {
             id: 1,
             min: 10,
             max: 20,
@@ -246,7 +250,7 @@ mod test {
     #[tokio::test]
     async fn mark_succeeded_works() {
         let repo = setup().await.unwrap();
-        let job_payload = JobPayload::Generate(crate::GeneratePayload {
+        let job_payload = JobPayload::Generate(GeneratePayload {
             id: 1,
             min: 10,
             max: 20,
@@ -266,7 +270,7 @@ mod test {
     #[tokio::test]
     async fn mark_failed_works() {
         let repo = setup().await.unwrap();
-        let job_payload = JobPayload::Generate(crate::GeneratePayload {
+        let job_payload = JobPayload::Generate(GeneratePayload {
             id: 1,
             min: 10,
             max: 20,
@@ -286,7 +290,7 @@ mod test {
     #[tokio::test]
     async fn requeue_works() {
         let repo = setup().await.unwrap();
-        let job_payload = JobPayload::Generate(crate::GeneratePayload {
+        let job_payload = JobPayload::Generate(GeneratePayload {
             id: 1,
             min: 10,
             max: 20,
@@ -319,7 +323,7 @@ mod test {
     #[tokio::test]
     async fn leased_job_is_not_requeued() {
         let repo = setup().await.unwrap();
-        let job_payload = JobPayload::Generate(crate::GeneratePayload {
+        let job_payload = JobPayload::Generate(GeneratePayload {
             id: 1,
             min: 10,
             max: 20,
@@ -335,7 +339,7 @@ mod test {
     #[tokio::test]
     async fn job_with_expired_lease_is_reclaimed() {
         let repo = setup().await.unwrap();
-        let job_payload = JobPayload::Generate(crate::GeneratePayload {
+        let job_payload = JobPayload::Generate(GeneratePayload {
             id: 1,
             min: 10,
             max: 20,
