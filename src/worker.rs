@@ -1,18 +1,11 @@
-mod job_repo;
-mod utils;
-mod handlers;
-mod jobs;
-
 use std::{str::FromStr, sync::Arc};
 
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 
-use crate::{job_repo::JobRepo, utils::unix_now};
-use handlers::*;
-use jobs::*;
+use crate::{HandleOutcome, HandlesJob, JobRepo, utils::unix_now};
 
 #[derive(Debug, PartialEq, Eq)]
-enum WorkerStep {
+pub enum WorkerStep {
     Idle,
     Succeeded { job_id: i64 },
     Retry { job_id: i64, reason: String },
@@ -20,7 +13,6 @@ enum WorkerStep {
 }
 
 const MAX_JOB_ATTEMPTS: i32 = 3;
-const DEFAULT_NUM_WORKERS: usize = 1;
 
 async fn run_worker_once(
     worker_id: usize,
@@ -82,14 +74,14 @@ async fn run_worker(
     }
 }
 
-struct Worker {
+pub struct Worker {
     num_workers: usize,
     repo: Arc<JobRepo>,
-    handler: Arc<dyn HandlesJob>
+    handler: Arc<dyn HandlesJob>,
 }
 
 impl Worker {
-    async fn new(num_workers: usize, handler: Arc<dyn HandlesJob>) -> anyhow::Result<Self> {
+    pub async fn new(num_workers: usize, handler: Arc<dyn HandlesJob>) -> anyhow::Result<Self> {
         let opts = SqliteConnectOptions::from_str("sqlite://local.db?mode=rwc")?
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
         let repo = Arc::new(JobRepo {
@@ -105,49 +97,33 @@ impl Worker {
         })
     }
 
-    async fn start(&self) -> anyhow::Result<()> {
+    pub async fn start(&self) -> anyhow::Result<()> {
         let mut worker_handles = Vec::new();
         let handler = &self.handler;
 
         println!("Starting with {} workers.", self.num_workers);
         for i in 0..self.num_workers {
-            worker_handles.push(tokio::spawn(run_worker(i, self.repo.clone(), handler.clone())));
+            worker_handles.push(tokio::spawn(run_worker(
+                i,
+                self.repo.clone(),
+                handler.clone(),
+            )));
         }
 
         for h in worker_handles {
             let _ = h.await?;
         }
-        
+
         Ok(())
     }
-}
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let mut num_workers: usize = DEFAULT_NUM_WORKERS;
-    let args: Vec<String> = std::env::args().collect();
-    for a in &args[1..] {
-        match a.parse() {
-            Ok(i) => num_workers = i,
-            Err(_) => {
-                eprintln!("Invalid number of workers passed: {a}.");
-                eprintln!("Defaulting to 1");
-            }
-        }
-    }
-
-    let worker = Worker::new(num_workers, Arc::new(Handler {})).await?;
-
-    worker.start().await?;
-
-    Ok(())
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::{Handler, JobPayload};
 
-    use handlers::mock::*;
+    use crate::handlers::mock::*;
 
     async fn setup() -> anyhow::Result<Arc<JobRepo>> {
         let opts = SqliteConnectOptions::from_str("sqlite::memory:")?

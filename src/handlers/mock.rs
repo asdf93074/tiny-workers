@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 
-use crate::JobPayload;
-use crate::handler::{HandleOutcome, HandlesJob};
+use crate::{HandleOutcome, HandlesJob, JobPayload};
 
 pub struct AlwaysSucceedHandler {}
 
