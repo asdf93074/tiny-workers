@@ -17,6 +17,7 @@ pub enum WorkerStep {
 pub struct WorkerConfig {
     pub max_job_attempts: i32,
     pub idle_poll_interval_ms: u64,
+    pub lease_for_secs: i64,
 }
 
 pub struct Worker<T> {
@@ -31,6 +32,7 @@ impl Default for WorkerConfig {
         Self {
             max_job_attempts: 3,
             idle_poll_interval_ms: 100,
+            lease_for_secs: 10,
         }
     }
 }
@@ -83,7 +85,7 @@ where
         handler: &dyn HandlesJob<T>,
         config: &WorkerConfig,
     ) -> anyhow::Result<WorkerStep> {
-        let maybe_job = repo.claim_next(unix_now(), 10).await?;
+        let maybe_job = repo.claim_next(unix_now(), config.lease_for_secs).await?;
 
         let Some(job) = maybe_job else {
             println!("[{worker_id}] No jobs available.");
