@@ -16,6 +16,7 @@ pub enum WorkerStep {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkerConfig {
     pub max_job_attempts: i32,
+    pub idle_poll_interval_ms: u64,
 }
 
 pub struct Worker<T> {
@@ -29,6 +30,7 @@ impl Default for WorkerConfig {
     fn default() -> Self {
         Self {
             max_job_attempts: 3,
+            idle_poll_interval_ms: 100,
         }
     }
 }
@@ -130,7 +132,7 @@ where
         loop {
             match Self::run_worker_once(worker_id, &repo, &*handler, &config).await {
                 Ok(WorkerStep::Idle) => {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await
+                    tokio::time::sleep(tokio::time::Duration::from_millis(config.idle_poll_interval_ms)).await
                 }
                 _ => {}
             }
