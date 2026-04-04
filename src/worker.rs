@@ -104,7 +104,8 @@ where
             Ok(HandleOutcome::Retry { reason }) => {
                 if job.attempts == config.max_job_attempts {
                     println!(
-                        "[{worker_id}] Job {job_id} failed 3 times. Reason: {reason}. Marking as failed."
+                        "[{worker_id}] Job {job_id} failed {} times. Reason: {reason}. Marking as failed.",
+                        config.max_job_attempts,
                     );
                     repo.mark_failed(job_id).await?;
                     Ok(WorkerStep::Failure { job_id, reason })
@@ -135,8 +136,11 @@ where
             match Self::run_worker_once(worker_id, &repo, &*handler, &config).await {
                 Ok(WorkerStep::Idle) => {
                     tokio::time::sleep(tokio::time::Duration::from_millis(config.idle_poll_interval_ms)).await
+                },
+                Ok(_) => {},
+                Err(e) => {
+                    eprintln!("[{worker_id}] Something went wrong while processing. {e}");
                 }
-                _ => {}
             }
         }
     }
