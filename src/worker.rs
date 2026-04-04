@@ -85,7 +85,9 @@ where
         handler: &dyn HandlesJob<T>,
         config: &WorkerConfig,
     ) -> anyhow::Result<WorkerStep> {
-        let maybe_job = repo.claim_next(unix_now(), config.lease_for_secs).await?;
+        let maybe_job = repo
+            .claim_next(unix_now(), config.lease_for_secs, config.max_job_attempts)
+            .await?;
 
         let Some(job) = maybe_job else {
             println!("[{worker_id}] No jobs available.");
@@ -135,9 +137,12 @@ where
         loop {
             match Self::run_worker_once(worker_id, &repo, &*handler, &config).await {
                 Ok(WorkerStep::Idle) => {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(config.idle_poll_interval_ms)).await
-                },
-                Ok(_) => {},
+                    tokio::time::sleep(tokio::time::Duration::from_millis(
+                        config.idle_poll_interval_ms,
+                    ))
+                    .await
+                }
+                Ok(_) => {}
                 Err(e) => {
                     eprintln!("[{worker_id}] Something went wrong while processing. {e}");
                 }

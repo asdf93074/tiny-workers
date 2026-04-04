@@ -51,6 +51,7 @@ impl<T: Serialize + DeserializeOwned> JobRepo<T> {
         &self,
         now: i64,
         lease_for_secs: i64,
+        max_attempts: i32,
     ) -> anyhow::Result<Option<ClaimedJob<T>>> {
         let claimed_job: Option<(i64, i32, String)> = sqlx::query_as(
             "
@@ -62,8 +63,8 @@ impl<T: Serialize + DeserializeOwned> JobRepo<T> {
                 updated_at = ?
             WHERE id = (
                 SELECT id FROM jobs
-                WHERE (status = ? AND attempts < 3 AND available_at <= ?)
-                OR (status = ? AND attempts < 3 AND leased_until < ?)
+                WHERE (status = ? AND attempts < ? AND available_at <= ?)
+                OR (status = ? AND attempts < ? AND leased_until < ?)
                 ORDER BY available_at ASC, id ASC
                 LIMIT 1
             )
@@ -75,8 +76,10 @@ impl<T: Serialize + DeserializeOwned> JobRepo<T> {
         .bind(now + lease_for_secs)
         .bind(now)
         .bind(JobStatus::Pending as i32)
+        .bind(max_attempts)
         .bind(now)
         .bind(JobStatus::Leased as i32)
+        .bind(max_attempts)
         .bind(now)
         .bind(JobStatus::Pending as i32)
         .bind(JobStatus::Leased as i32)
@@ -222,7 +225,7 @@ mod test {
         });
         assert_eq!(repo.enqueue(&job_payload).await.unwrap(), 1);
 
-        let claimed_job = repo.claim_next(unix_now(), 10).await.unwrap();
+        let claimed_job = repo.claim_next(unix_now(), 10, 3).await.unwrap();
         match claimed_job {
             Some(claim) => {
                 if let JobPayload::Generate(gen_payload) = job_payload {
@@ -297,7 +300,7 @@ mod test {
         });
         assert_eq!(repo.enqueue(&job_payload).await.unwrap(), 1);
 
-        let claimed_job = repo.claim_next(unix_now(), 10).await.unwrap();
+        let claimed_job = repo.claim_next(unix_now(), 10, 3).await.unwrap();
         let last_error = "Test";
         match claimed_job {
             Some(claim) => {
@@ -330,8 +333,8 @@ mod test {
         });
         assert_eq!(repo.enqueue(&job_payload).await.unwrap(), 1);
 
-        let _ = repo.claim_next(unix_now(), 10).await.unwrap();
-        let empty_claim = repo.claim_next(unix_now(), 10).await.unwrap();
+        let _ = repo.claim_next(unix_now(), 10, 3).await.unwrap();
+        let empty_claim = repo.claim_next(unix_now(), 10, 3).await.unwrap();
 
         assert!(empty_claim.is_none())
     }
@@ -346,13 +349,67 @@ mod test {
         });
         assert_eq!(repo.enqueue(&job_payload).await.unwrap(), 1);
 
-        let claim1 = repo.claim_next(unix_now(), 10).await.unwrap().unwrap();
+        let claim1 = repo.claim_next(unix_now(), 10, 3).await.unwrap().unwrap();
         let claim2 = repo
-            .claim_next(unix_now() + 1000, 10)
+            .claim_next(unix_now() + 1000, 10, 3)
             .await
             .unwrap()
             .unwrap();
 
         assert_eq!(claim1.queue_id, claim2.queue_id)
+    }
+
+    #[tokio::test]
+    async fn max_attempts_works() {
+        let repo = setup().await.unwrap();
+        let job_payload = JobPayload::Generate(GeneratePayload {
+            id: 1,
+            min: 10,
+            max: 20,
+        });
+        assert_eq!(repo.enqueue(&job_payload).await.unwrap(), 1);
+
+        let claim = repo
+            .claim_next(unix_now(), 0, 3)
+            .await
+            .unwrap();
+        assert!(claim.is_some());
+        let claim = repo
+            .claim_next(unix_now() + 1, 0, 3)
+            .await
+            .unwrap();
+        assert!(claim.is_some());
+        let claim = repo
+            .claim_next(unix_now() + 2, 0, 3)
+            .await
+            .unwrap();
+        assert!(claim.is_some());
+    }
+
+    #[tokio::test]
+    async fn no_claim_if_max_attempts_exceeded() {
+        let repo = setup().await.unwrap();
+        let job_payload = JobPayload::Generate(GeneratePayload {
+            id: 1,
+            min: 10,
+            max: 20,
+        });
+        assert_eq!(repo.enqueue(&job_payload).await.unwrap(), 1);
+
+        let claim = repo
+            .claim_next(unix_now(), 0, 2)
+            .await
+            .unwrap();
+        assert!(claim.is_some());
+        let claim = repo
+            .claim_next(unix_now() + 1, 0, 2)
+            .await
+            .unwrap();
+        assert!(claim.is_some());
+        let claim = repo
+            .claim_next(unix_now() + 2, 0, 2)
+            .await
+            .unwrap();
+        assert!(claim.is_none());
     }
 }
