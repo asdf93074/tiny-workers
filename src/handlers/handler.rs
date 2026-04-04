@@ -31,12 +31,10 @@ pub mod test {
             match job_payload {
                 JobPayload::Generate(_payload) => {
                     println!("Generate payload.");
-                    tokio::time::sleep(tokio::time::Duration::from_millis(0)).await;
                     Ok(HandleOutcome::Succeeded)
                 }
                 JobPayload::Resolve(_payload) => {
                     println!("Resolve payload.");
-                    tokio::time::sleep(tokio::time::Duration::from_millis(0)).await;
                     Ok(HandleOutcome::Retry {
                         reason: String::from("just testing"),
                     })
