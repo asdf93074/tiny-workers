@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use workerv2::{HandleOutcome, HandlesJob, Worker};
+use tiny_workers::{HandleOutcome, HandlesJob, Worker};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
