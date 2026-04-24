@@ -263,7 +263,7 @@ mod test {
 
     #[tokio::test]
     async fn mark_succeeded_works() {
-		let repo = setup_and_enqueue().await.unwrap();
+        let repo = setup_and_enqueue().await.unwrap();
 
         let _ = repo.mark_succeeded(1).await;
 
@@ -277,7 +277,7 @@ mod test {
 
     #[tokio::test]
     async fn mark_failed_works() {
-		let repo = setup_and_enqueue().await.unwrap();
+        let repo = setup_and_enqueue().await.unwrap();
 
         let _ = repo.mark_failed(1).await;
 
@@ -291,7 +291,7 @@ mod test {
 
     #[tokio::test]
     async fn requeue_works() {
-		let repo = setup_and_enqueue().await.unwrap();
+        let repo = setup_and_enqueue().await.unwrap();
 
         let claimed_job = repo.claim_next(unix_now(), 10, 3).await.unwrap();
         let last_error = "Test";
@@ -318,7 +318,7 @@ mod test {
 
     #[tokio::test]
     async fn leased_job_is_not_requeued() {
-		let repo = setup_and_enqueue().await.unwrap();
+        let repo = setup_and_enqueue().await.unwrap();
 
         let _ = repo.claim_next(unix_now(), 10, 3).await.unwrap();
         let empty_claim = repo.claim_next(unix_now(), 10, 3).await.unwrap();
@@ -328,7 +328,7 @@ mod test {
 
     #[tokio::test]
     async fn job_with_expired_lease_is_reclaimed() {
-		let repo = setup_and_enqueue().await.unwrap();
+        let repo = setup_and_enqueue().await.unwrap();
 
         let claim1 = repo.claim_next(unix_now(), 10, 3).await.unwrap().unwrap();
         let claim2 = repo
@@ -342,43 +342,25 @@ mod test {
 
     #[tokio::test]
     async fn max_attempts_works() {
-		let repo = setup_and_enqueue().await.unwrap();
+        let repo = setup_and_enqueue().await.unwrap();
 
-        let claim = repo
-            .claim_next(unix_now(), 0, 3)
-            .await
-            .unwrap();
+        let claim = repo.claim_next(unix_now(), 0, 3).await.unwrap();
         assert!(claim.is_some());
-        let claim = repo
-            .claim_next(unix_now() + 1, 0, 3)
-            .await
-            .unwrap();
+        let claim = repo.claim_next(unix_now() + 1, 0, 3).await.unwrap();
         assert!(claim.is_some());
-        let claim = repo
-            .claim_next(unix_now() + 2, 0, 3)
-            .await
-            .unwrap();
+        let claim = repo.claim_next(unix_now() + 2, 0, 3).await.unwrap();
         assert!(claim.is_some());
     }
 
     #[tokio::test]
     async fn no_claim_if_max_attempts_exceeded() {
-		let repo = setup_and_enqueue().await.unwrap();
+        let repo = setup_and_enqueue().await.unwrap();
 
-        let claim = repo
-            .claim_next(unix_now(), 0, 2)
-            .await
-            .unwrap();
+        let claim = repo.claim_next(unix_now(), 0, 2).await.unwrap();
         assert!(claim.is_some());
-        let claim = repo
-            .claim_next(unix_now() + 1, 0, 2)
-            .await
-            .unwrap();
+        let claim = repo.claim_next(unix_now() + 1, 0, 2).await.unwrap();
         assert!(claim.is_some());
-        let claim = repo
-            .claim_next(unix_now() + 2, 0, 2)
-            .await
-            .unwrap();
+        let claim = repo.claim_next(unix_now() + 2, 0, 2).await.unwrap();
         assert!(claim.is_none());
     }
 }
